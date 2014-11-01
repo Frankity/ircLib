@@ -8,7 +8,7 @@ using System.Threading;
 
 namespace irc
 {
-    // TODO: change OnJoin to passive (wait for incoming JOIN message with our name), 331 no topic set, test receive (delete old code?), store numeric replies in class?, shouldReceive = true when connecting after Disconnect()/fix reconnecting
+    // TODO: exception bei reconnect, change OnJoin to passive (wait for incoming JOIN message with our name), store numeric replies in class?, test reconnecting
 
     public class IrcBot
     {
@@ -16,41 +16,43 @@ namespace irc
         private NetworkStream botStream;
         private StreamWriter writer;
         private StreamReader reader;
-        private string server, name, ircMessage, channels, quitMsg, versionMsg;
-        private int port;
+        private string name, ircMessage, channels, quitMsg, versionMsg;
         private List<string> owners;
         private static bool shouldShutdown = false, shouldReceive = true;
 
         public delegate void IrcMessageDelegate(IrcMessage m);
-        public virtual event IrcMessageDelegate OnQueryMessageEvent;
-        public virtual event IrcMessageDelegate OnChannelMessageEvent;
-        public virtual event IrcMessageDelegate OnAnyMessageEvent;
-        public virtual event IrcMessageDelegate OnNoticeEvent;
-        public virtual event IrcMessageDelegate OnMotdEvent;
+        public event IrcMessageDelegate OnQueryMessageEvent;
+        public event IrcMessageDelegate OnChannelMessageEvent;
+        public event IrcMessageDelegate OnAnyMessageEvent;
+        public event IrcMessageDelegate OnNoticeEvent;
+        public event IrcMessageDelegate OnMotdEvent;
 
         public delegate void ChannelDelegate(string channel);
-        public virtual event ChannelDelegate OnJoinChannelEvent;
-        public virtual event ChannelDelegate OnPartChannelEvent;
+        public event ChannelDelegate OnJoinChannelEvent;
+        public event ChannelDelegate OnPartChannelEvent;
 
         public delegate void ErrorDelegate(string errorMessage);
-        public virtual event ErrorDelegate OnErrorEvent;
+        public event ErrorDelegate OnErrorEvent;
 
         public delegate void TwoStringsDelegate(string sender, string command);
-        public virtual event TwoStringsDelegate OnActionEvent;
-        public virtual event TwoStringsDelegate OnCtcpResponseEvent;
+        public event TwoStringsDelegate OnActionEvent;
+        public event TwoStringsDelegate OnCtcpResponseEvent;
         private event TwoStringsDelegate OnCtcpRequestEvent; // Can not be subscribed to from outside.
 
         public delegate void TopicDelegate(string channel, string topic);
-        public virtual event TopicDelegate OnTopicMessageEvent;
+        public event TopicDelegate OnTopicMessageEvent;
+        public event TopicDelegate OnTopicNotSetMessageEvent;
 
         public delegate void NickChangeDelegate(string oldNick, string newNick);
-        public virtual event NickChangeDelegate OnNickChangeEvent;
+        public event NickChangeDelegate OnNickChangeEvent;
         
         public delegate void UserlistDelegate(string channel, string[] users);
-        public virtual event UserlistDelegate OnNamereplyEvent;
+        public event UserlistDelegate OnNamereplyEvent;
 
         public delegate void VoidDelegate();
-        public virtual event VoidDelegate OnLoginEvent;
+        public event VoidDelegate OnLoginEvent;
+        public event VoidDelegate OnDisconnectEvent;
+        public event VoidDelegate OnConnectEvent;
         
 
         [DllImport("Kernel32")]
@@ -83,30 +85,15 @@ namespace irc
         /// <param name="owners">A List of IRC nicknames that have full control over the bot</param>
         /// <param name="useIdent">When true, the bot will be listening for IDENT request on port 113 in a seperate thread for a short time after connecting</param>
         /// <param name="verbose">When true, additional information is written to the console</param>
-        public IrcBot(string server, int port, string botname, string channels, List<string> owners, bool useIdent)
+        public IrcBot(string botname, string channels, List<string> owners, bool useIdent)
         {
             this.name = botname;
-            this.server = server;
-            this.port = port;
             this.channels = channels; // can be a single channel, a comma seperated list or null
             this.quitMsg = "Leaving";
             this.versionMsg = "Undefined version";
             this.owners = owners;
 
-            InitializeNetwork(server, port);
             if (IsWindows()) InitializePostexitHook();
-
-
-            if (useIdent)
-            {
-                IdentListener identListener = new IdentListener(name);
-                new Thread(identListener.Listen).Start();
-            }
-
-            new Thread(Receive).Start();
-            OnCtcpRequestEvent += HandleCtcpRequest;
-            Login();
-            
         }
         /// <summary>
         /// Minimalistic constructor. Joining channels and adding owners is still possible via methods.
@@ -114,20 +101,13 @@ namespace irc
         /// <param name="server">Hostname of the IRC server</param>
         /// <param name="port">The port the IRCd is listening on</param>
         /// <param name="botname">The name this client will be using</param>
-        public IrcBot(string server, int port, string botname)
+        public IrcBot(string botname)
         {
             this.name = botname;
-            this.server = server;
-            this.port = port;
             this.quitMsg = "Leaving";
             this.versionMsg = "Undefined version";
 
-            InitializeNetwork(server, port);
             if (IsWindows()) InitializePostexitHook();
-
-            new Thread(Receive).Start();
-            OnCtcpRequestEvent += HandleCtcpRequest;
-            Login();
         }
 
 
@@ -174,14 +154,24 @@ namespace irc
         /// </summary>
         /// <param name="server">Hostname of the IRC server</param>
         /// <param name="port">The port the IRCd is listening on</param>
-        public void InitializeNetwork(string server, int port)
+        public void Connect(string server, int port)
         {
+            IdentListener identListener = new IdentListener(name);
+            new Thread(identListener.Listen).Start();
+
             this.botSocket = new TcpClient(server, port);
             this.botStream = botSocket.GetStream();
             this.writer = new StreamWriter(botStream);
             this.writer.AutoFlush = true;
             this.writer.NewLine = "\r\n";  // no effect
             this.reader = new StreamReader(botStream);
+
+            OnConnect();
+            shouldReceive = true;
+
+            new Thread(Receive).Start();
+            OnCtcpRequestEvent += HandleCtcpRequest; // hardcoded, only the replies can be changed (e.g. versionMsg)
+            Login();
         }
         /// <summary>
         /// Send a raw IRC command to the IRCd
@@ -239,27 +229,10 @@ namespace irc
         {
             try
             {
-                while (!String.IsNullOrEmpty(ircMessage = reader.ReadLine()) && shouldReceive)
+                while ((ircMessage = reader.ReadLine()) != null && shouldReceive)
                 {
                     if (ircMessage.ToLower().StartsWith("ping")) Pong(ircMessage.Replace(ircMessage.Substring(0, 5), "")); // reply to PING with the given payload
                     else if (ircMessage.ToLower().StartsWith("error")) { OnErrorMessage(ircMessage); }
-
-                    /* else if (ircMessage.StartsWith(":") && (ircMessage.Length - ircMessage.Replace(":", "").Length) >= 2 ) // only digest relevant messages
-                    {
-                        // demo: :nickname!username@host.provider.net PRIVMSG recipient :text
-                        String[] splits1 = ircMessage.Split(' ');
-                        String[] splits2 = ircMessage.Split(':');
-                        if (splits1[1].Equals("353") && splits1.Length >= 6) splits1[2] = splits1[4]; // Patch: If it's a RPL_NAMEREPLY, set the destination to the channel
-                        // Example of 353 message: :irc.server.com 353 destination_user = #joined_channel :+user1 user1
-                        String msg = ircMessage.Substring(1, ircMessage.Length - 1); // remove first ":"
-                        msg = msg.Substring(msg.IndexOf(":"), msg.Length - msg.IndexOf(":")); // only keep actual message (part behind 2nd ":")
-                        if (splits1.Length >= 4 && splits2.Length >= 3)
-                        {
-                            IrcMessage m = new IrcMessage(splits1[0], splits1[1], splits1[2], msg);
-                            HandleIRCMessage(m);
-                        }
-                    } */
-
                     else DistributeIrcMessage(ParseIrcMessage(ircMessage));
                 }
             }
@@ -388,6 +361,9 @@ namespace irc
         {
             switch (m.getCommand())
             {
+                case "331":
+                    OnTopicNotSetMessage(m);
+                    break;
                 case "332":
                     OnTopicMessage(m);
                     break;
@@ -459,6 +435,7 @@ namespace irc
         /// </summary>
         public void Disconnect()
         {
+            OnDisconnect();
             Quit();
             writer.Close();
             reader.Close();
@@ -469,6 +446,18 @@ namespace irc
 
         // Event assigning
 
+        private void OnConnect()
+        {
+            if (OnConnectEvent != null) OnConnectEvent();
+        }
+        private void OnDisconnect()
+        {
+            if (OnDisconnectEvent != null) OnDisconnectEvent();
+        }
+        private void OnLogin()
+        {
+            if (OnLoginEvent != null) { OnLoginEvent(); }
+        }
         private void OnQueryMessage(IrcMessage m)
         {
             if (OnQueryMessageEvent != null) OnQueryMessageEvent(m);
@@ -528,15 +517,20 @@ namespace irc
         }
         private void OnTopicMessage(IrcMessage m)
         {
-            if (m.getParameters().Length == 2)
+            if (m.getParameters().Length == 2 && OnTopicMessageEvent != null)
             {
-                OnTopicMessageEvent(m.getParameters()[1], m.getMessage());
+                OnTopicMessageEvent(m.getParameters()[1], m.getMessage()); // Channel/topic
             }
         }
-        private void OnLogin()
+        private void OnTopicNotSetMessage(IrcMessage m)
         {
-            if (OnLoginEvent != null) OnLoginEvent();
+            if (m.getParameters().Length == 2 && OnTopicNotSetMessageEvent != null)
+            {
+                OnTopicNotSetMessageEvent(m.getParameters()[1], m.getMessage()); // Channel/"No topic is set"
+            }
+            
         }
+        
         /// <summary>
         /// Triggers on both others' nicks and our nick.
         /// </summary>
@@ -689,14 +683,6 @@ namespace irc
             shouldReceive = false; // Will stop the Receive() loop
             shouldShutdown = true; // Will trigger CheckShutdown() and therefore Disconnect()
         }
-        public string getServer()
-        {
-            return server;
-        }
-        public int getPort()
-        {
-            return port;
-        }
     }
 
     /// <summary>
@@ -796,5 +782,4 @@ namespace irc
             }
         }
     }
-
 }
