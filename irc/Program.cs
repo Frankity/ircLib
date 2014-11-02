@@ -8,7 +8,7 @@ using System.Threading;
 
 namespace irc
 {
-    // TODO: exception bei reconnect, change OnJoin to passive (wait for incoming JOIN message with our name), store numeric replies in class?
+    // TODO: exception bei reconnect, store numeric replies in class?
 
     public class IrcBot
     {
@@ -320,6 +320,10 @@ namespace irc
             {
                 HandleNickMessage(m);
             }
+            else if (m.getCommand().ToLower().Equals("join"))
+            {
+                HandleJoinMessage(m);
+            }
             else if (isNumericIrcResponse(m.getCommand()))
             {
                 HandleNumericMessage(m);
@@ -358,6 +362,13 @@ namespace irc
         {
             if (m.getSenderName().Equals(name)) name = m.getMessage();
             OnNickChange(m.getSenderName(), m.getMessage());
+        }
+        private void HandleJoinMessage(IrcMessage m)
+        {
+            if (m.getSenderName().Equals(name))
+            {
+                OnJoinChannelEvent(m.getMessage());
+            }
         }
         private void HandleNumericMessage(IrcMessage m)
         {
@@ -515,6 +526,10 @@ namespace irc
         {
             if (OnPartChannelEvent != null) OnPartChannelEvent(channel);
         }
+        /// <summary>
+        /// One or more namereply messages are sent when joining a channel.
+        /// </summary>
+        /// <param name="m">The IrcMessage containing the namereply message</param>
         private void OnNamereplyMessage(IrcMessage m)
         {
             if (m.getParameters().Length == 3 && m.getParameters()[2].StartsWith("#") && OnNamereplyEvent != null)
@@ -567,20 +582,7 @@ namespace irc
         /// <param name="channel">A comma-seperated list of channels to join</param>
         public void JoinChannel(string channel)
         {
-            if (channel != null)
-            {
-                SendRaw("JOIN " + channel); // the IRCd will detect if it's one or more channels
-                channel = channel.Replace(" ", ""); // in case it's a list of channels
-                if (channel.Contains(","))
-                {
-                    string[] channels = channel.Split(',');
-                    foreach (string chan in channels)
-                    {
-                        OnJoinChannel(chan);
-                    }
-                }
-                else { OnJoinChannel(channel); }
-            }
+            if (channel != null) { SendRaw("JOIN " + channel); } // the IRCd will detect if it's one or more channels
         }
         /// <summary>
         /// Leave one or more channels (comma-seperated string, spaces will be replaced)

@@ -18,7 +18,7 @@ namespace DemoBot
 
         public DemoBot()
         {
-            irc = new IrcBot("demobot", null, new System.Collections.Generic.List<string> { "RobbingHood" }, false);
+            irc = new IrcBot("demobot", "null", new System.Collections.Generic.List<string> { "RobbingHood" }, false);
             
             irc.OnMotdEvent += irc_OnMotdEvent;
             irc.OnJoinChannelEvent += irc_OnJoinChannelEvent;
