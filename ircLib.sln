@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 2013
 VisualStudioVersion = 12.0.30723.0
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "irc", "irc\irc.csproj", "{E2719EE6-FE98-41BD-836D-322DC351164C}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ircLib", "ircLib\ircLib.csproj", "{E2719EE6-FE98-41BD-836D-322DC351164C}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DemoBot", "DemoBot\DemoBot.csproj", "{4C5FF864-687A-4C1D-9AF9-EEAB9521039B}"
 EndProject

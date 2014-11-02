@@ -7,8 +7,8 @@
     <ProjectGuid>{E2719EE6-FE98-41BD-836D-322DC351164C}</ProjectGuid>
     <OutputType>Library</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
-    <RootNamespace>irc</RootNamespace>
-    <AssemblyName>irc</AssemblyName>
+    <RootNamespace>ircLib</RootNamespace>
+    <AssemblyName>ircLib</AssemblyName>
     <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
   </PropertyGroup>

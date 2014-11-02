@@ -6,7 +6,7 @@ using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Threading;
 
-namespace irc
+namespace ircLib
 {
     // TODO: exception bei reconnect, store numeric replies in class?
 

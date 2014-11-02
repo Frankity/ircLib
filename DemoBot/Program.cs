@@ -1,5 +1,5 @@
 ﻿using System;
-using irc;
+using ircLib;
 using System.Threading;
 
 namespace DemoBot
