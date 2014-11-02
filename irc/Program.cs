@@ -8,7 +8,7 @@ using System.Threading;
 
 namespace irc
 {
-    // TODO: exception bei reconnect, change OnJoin to passive (wait for incoming JOIN message with our name), store numeric replies in class?, test reconnecting
+    // TODO: exception bei reconnect, change OnJoin to passive (wait for incoming JOIN message with our name), store numeric replies in class?
 
     public class IrcBot
     {
@@ -18,7 +18,7 @@ namespace irc
         private StreamReader reader;
         private string name, ircMessage, channels, quitMsg, versionMsg;
         private List<string> owners;
-        private static bool shouldShutdown = false, shouldReceive = true;
+        private static bool shouldShutdown = false, shouldReceive = true, connected = false;
 
         public delegate void IrcMessageDelegate(IrcMessage m);
         public event IrcMessageDelegate OnQueryMessageEvent;
@@ -53,6 +53,7 @@ namespace irc
         public event VoidDelegate OnLoginEvent;
         public event VoidDelegate OnDisconnectEvent;
         public event VoidDelegate OnConnectEvent;
+        public event VoidDelegate OnEndOfMotdEvent;
         
 
         [DllImport("Kernel32")]
@@ -166,8 +167,9 @@ namespace irc
             this.writer.NewLine = "\r\n";  // no effect
             this.reader = new StreamReader(botStream);
 
-            OnConnect();
             shouldReceive = true;
+            connected = true;
+            OnConnect();
 
             new Thread(Receive).Start();
             OnCtcpRequestEvent += HandleCtcpRequest; // hardcoded, only the replies can be changed (e.g. versionMsg)
@@ -374,6 +376,7 @@ namespace irc
                     OnMotdMessage(m);
                     break;
                 case "376": // End of MOTD
+                    OnEndOfMotd();
                     JoinChannel(channels); // IRCd should be ready for JOIN commands after MOTD is finished
                     break;
                 case "431":
@@ -441,6 +444,7 @@ namespace irc
             reader.Close();
             botStream.Close();
             botSocket.Close();
+            connected = false;
         }
         
 
@@ -457,6 +461,10 @@ namespace irc
         private void OnLogin()
         {
             if (OnLoginEvent != null) { OnLoginEvent(); }
+        }
+        private void OnEndOfMotd()
+        {
+            if (OnEndOfMotdEvent != null) OnEndOfMotdEvent();
         }
         private void OnQueryMessage(IrcMessage m)
         {
@@ -548,9 +556,9 @@ namespace irc
         /// </summary>
         public void Login()
         {
-            OnLogin();
             SendRaw("NICK " + name);
             SendRaw("USER " + name + " 0 * :" + name);
+            OnLogin();
         }
         /// <summary>
         /// Join one or more channels (comma-seperated string, spaces will be replaced)
@@ -607,7 +615,16 @@ namespace irc
         /// <param name="nick">The new nickname</param>
         public void ChangeNick(string nick)
         {
-            SendRaw("NICK " + nick);
+            if (connected) SendRaw("NICK " + nick);
+        }
+        /// <summary>
+        /// Changes the variable "name" if the bot is not connected to any network.
+        /// Used when reconnecting with a different nickname.
+        /// </summary>
+        /// <param name="nick">The new nickname</param>
+        public void ChangeNickOffline(string nick)
+        {
+            if (!connected) name = nick;
         }
         /// <summary>
         /// Replies to a PING message in order to signalize the server that this client is still alive

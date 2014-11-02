@@ -27,8 +27,15 @@ namespace DemoBot
             irc.OnAnyMessageEvent += irc_OnAnyMessageEvent;
             irc.OnNoticeEvent += irc_OnNoticeEvent;
             irc.OnLoginEvent += irc_OnLoginEvent;
+            irc.OnEndOfMotdEvent += irc_OnEndOfMotdEvent;
 
             irc.Connect("irc.rizon.net", 6660);
+        }
+
+        void irc_OnEndOfMotdEvent()
+        {
+            Console.WriteLine("End of Motd");
+            irc.JoinChannel("#demobot");
         }
 
         void irc_OnNoticeEvent(IrcMessage m)
@@ -42,7 +49,10 @@ namespace DemoBot
             if (m.getSenderName().Equals("RobbingHood") && m.getMessage().Equals("!re"))
             {
                 irc.Disconnect();
+                irc.ChangeNickOffline("demobot2");
+                Thread.Sleep(1000);
                 irc.Connect("irc.rizon.net", 6660);
+                Thread.Sleep(1000);
                 irc.Login();
             }
         }
@@ -69,7 +79,7 @@ namespace DemoBot
 
         void irc_OnLoginEvent()
         {
-            irc.JoinChannel("#demobot");
+            Console.WriteLine("Logged in!");
         }
     }
 }
