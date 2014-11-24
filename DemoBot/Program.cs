@@ -18,16 +18,16 @@ namespace DemoBot
 
         public DemoBot()
         {
-            irc = new IrcBot("demobot", "null", new System.Collections.Generic.List<string> { "RobbingHood" }, false);
+            irc = new IrcBot("demobot", "#demobot");
             
-            irc.OnMotdEvent += irc_OnMotdEvent;
+            /*irc.OnMotdEvent += irc_OnMotdEvent;
             irc.OnJoinChannelEvent += irc_OnJoinChannelEvent;
             irc.OnDisconnectEvent += irc_OnDisconnectEvent;
             irc.OnConnectEvent += irc_OnConnectEvent;
             irc.OnAnyMessageEvent += irc_OnAnyMessageEvent;
             irc.OnNoticeEvent += irc_OnNoticeEvent;
             irc.OnLoginEvent += irc_OnLoginEvent;
-            irc.OnEndOfMotdEvent += irc_OnEndOfMotdEvent;
+            irc.OnEndOfMotdEvent += irc_OnEndOfMotdEvent;*/
 
             irc.Connect("irc.rizon.net", 6660);
         }

@@ -8,7 +8,7 @@ using System.Threading;
 
 namespace ircLib
 {
-    // TODO: exception bei reconnect, store numeric replies in class?
+    // TODO: nullpointer on exit without priorly connecting, exception bei reconnect, store numeric replies in class?, useIdent bool?
 
     public class IrcBot
     {
@@ -17,7 +17,6 @@ namespace ircLib
         private StreamWriter writer;
         private StreamReader reader;
         private string name, ircMessage, channels, quitMsg, versionMsg;
-        private List<string> owners;
         private static bool shouldShutdown = false, shouldReceive = true, connected = false;
 
         public delegate void IrcMessageDelegate(IrcMessage m);
@@ -42,6 +41,9 @@ namespace ircLib
         public delegate void TopicDelegate(string channel, string topic);
         public event TopicDelegate OnTopicMessageEvent;
         public event TopicDelegate OnTopicNotSetMessageEvent;
+
+        public delegate void TopicChangedDelegate(string changedBy, string channel, string topic);
+        public event TopicChangedDelegate OnTopicChangedMessageEvent;
 
         public delegate void NickChangeDelegate(string oldNick, string newNick);
         public event NickChangeDelegate OnNickChangeEvent;
@@ -77,40 +79,19 @@ namespace ircLib
         // Constructors
 
         /// <summary>
-        /// Full constructor
+        /// Constructor. After the IrcBot is created, subscribe to it's events!
         /// </summary>
-        /// <param name="server">Hostname of the IRC server</param>
-        /// <param name="port">The port the IRCd is listening on</param>
         /// <param name="botname">The name this client will be using</param>
         /// <param name="channels">A comma-seperated list of channels (e.g.: "#channel1, #channel2". Spaces will be removed)</param>
-        /// <param name="owners">A List of IRC nicknames that have full control over the bot</param>
-        /// <param name="useIdent">When true, the bot will be listening for IDENT request on port 113 in a seperate thread for a short time after connecting</param>
-        /// <param name="verbose">When true, additional information is written to the console</param>
-        public IrcBot(string botname, string channels, List<string> owners, bool useIdent)
+        public IrcBot(string botname, string channels)
         {
             this.name = botname;
             this.channels = channels; // can be a single channel, a comma seperated list or null
             this.quitMsg = "Leaving";
             this.versionMsg = "Undefined version";
-            this.owners = owners;
 
             if (IsWindows()) InitializePostexitHook();
         }
-        /// <summary>
-        /// Minimalistic constructor. Joining channels and adding owners is still possible via methods.
-        /// </summary>
-        /// <param name="server">Hostname of the IRC server</param>
-        /// <param name="port">The port the IRCd is listening on</param>
-        /// <param name="botname">The name this client will be using</param>
-        public IrcBot(string botname)
-        {
-            this.name = botname;
-            this.quitMsg = "Leaving";
-            this.versionMsg = "Undefined version";
-
-            if (IsWindows()) InitializePostexitHook();
-        }
-
 
         // Postconstruction
 
@@ -178,11 +159,14 @@ namespace ircLib
         /// <summary>
         /// Send a raw IRC command to the IRCd
         /// </summary>
-        /// <param name="message">The raw command to send</param>
-        public void SendRaw(string message)
+        /// <param name="command">The raw command to send</param>
+        public void SendRaw(string command)
         {
-            writer.WriteLine(message);
-            writer.Flush();
+            if (writer != null)
+            {
+                writer.WriteLine(command);
+                writer.Flush();
+            }
         }
         /// <summary>
         /// Send a text message to either a channel or a user
@@ -191,8 +175,11 @@ namespace ircLib
         /// <param name="message">The text message to send</param>
         public void Send(string destination, string message)
         {
-            writer.WriteLine("PRIVMSG " + destination + " :" + message);
-            writer.Flush();
+            if (writer != null)
+            {
+                writer.WriteLine("PRIVMSG " + destination + " :" + message);
+                writer.Flush();
+            }
         }
         /// <summary>
         /// Sends a CTCP request (e.g.: PING, VERSION) to another user
@@ -201,8 +188,11 @@ namespace ircLib
         /// <param name="message">The CTCP command</param>
         public void SendCtcpRequest(string user, string message)
         {
-            writer.WriteLine("PRIVMSG " + user + " :" + '\x01' + message + '\x01');
-            writer.Flush();
+            if (writer != null)
+            {
+                writer.WriteLine("PRIVMSG " + user + " :" + '\x01' + message + '\x01');
+                writer.Flush();
+            }
         }
         /// <summary>
         /// Replies to a CTCP request
@@ -211,8 +201,11 @@ namespace ircLib
         /// <param name="message">The CTCP response (e.g. VERSION 0.1b Windows)</param>
         private void SendCtcpResponse(string user, string message)
         {
-            writer.WriteLine("NOTICE " + user + " :" + '\x01' + message + '\x01');
-            writer.Flush();
+            if (writer != null)
+            {
+                writer.WriteLine("NOTICE " + user + " :" + '\x01' + message + '\x01');
+                writer.Flush();
+            }
         }
         /// <summary>
         /// Send an ACTION to a channel/client. Clients will usually append the sender's name to the message.
@@ -231,7 +224,7 @@ namespace ircLib
         {
             try
             {
-                while ((ircMessage = reader.ReadLine()) != null && shouldReceive)
+                while (shouldReceive && (ircMessage = reader.ReadLine()) != null)
                 {
                     if (ircMessage.ToLower().StartsWith("ping")) Pong(ircMessage.Replace(ircMessage.Substring(0, 5), "")); // reply to PING with the given payload
                     else if (ircMessage.ToLower().StartsWith("error")) { OnErrorMessage(ircMessage); }
@@ -324,6 +317,10 @@ namespace ircLib
             {
                 HandleJoinMessage(m);
             }
+            else if (m.getCommand().ToLower().Equals("topic"))
+            {
+                HandleTopicMessage(m);
+            }
             else if (isNumericIrcResponse(m.getCommand()))
             {
                 HandleNumericMessage(m);
@@ -367,8 +364,12 @@ namespace ircLib
         {
             if (m.getSenderName().Equals(name))
             {
-                OnJoinChannelEvent(m.getMessage());
+                if (OnJoinChannelEvent != null) OnJoinChannelEvent(m.getMessage());
             }
+        }
+        private void HandleTopicMessage(IrcMessage m)
+        {
+            OnTopicChangedMessage(m);
         }
         private void HandleNumericMessage(IrcMessage m)
         {
@@ -451,10 +452,10 @@ namespace ircLib
         {
             OnDisconnect();
             Quit();
-            writer.Close();
-            reader.Close();
-            botStream.Close();
-            botSocket.Close();
+            if (writer != null) writer.Close();
+            if (reader != null) reader.Close();
+            if (botStream != null) botStream.Close();
+            if (botSocket != null) botSocket.Close();
             connected = false;
         }
         
@@ -543,6 +544,13 @@ namespace ircLib
             if (m.getParameters().Length == 2 && OnTopicMessageEvent != null)
             {
                 OnTopicMessageEvent(m.getParameters()[1], m.getMessage()); // Channel/topic
+            }
+        }
+        private void OnTopicChangedMessage(IrcMessage m)
+        {
+            if (m.getParameters().Length == 1 && OnTopicChangedMessageEvent != null)
+            {
+                OnTopicChangedMessageEvent(m.getSenderName(), m.getParameters()[0], m.getMessage());
             }
         }
         private void OnTopicNotSetMessage(IrcMessage m)
@@ -640,34 +648,6 @@ namespace ircLib
 
         // Getters, Setters, etc.
 
-        /// <summary>
-        /// Checks if a user is marked as an owner. Used to limit commands to specific users only.
-        /// </summary>
-        /// <param name="user">The user to check</param>
-        /// <returns></returns>
-        public bool isOwner(string user)
-        {
-            if (owners != null) return owners.Contains(user);
-            else return false;
-        }
-        /// <summary>
-        /// Add a new user to the List of users who are marked as owners
-        /// </summary>
-        /// <param name="owner">The user to add as an owner</param>
-        public void AddOwner(string owner)
-        {
-            if (owners != null) owners.Add(owner);
-            else owners = new List<string> { owner };
-        }
-        /// <summary>
-        /// Remove a user from the List of users who are marked as owners
-        /// </summary>
-        /// <param name="owner">The user to remove from the List of owners</param>
-        public void RemoveOwner(string owner)
-        {
-            if (owners != null) owners.Remove(owner);
-            else OnErrorMessage("Cannot remove owner from empty List! (nullptr)");
-        }
         /// <summary>
         /// Change/replace/remove the message that is shown the the channel when this client disconnects
         /// </summary>
